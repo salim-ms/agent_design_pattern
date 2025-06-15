@@ -41,6 +41,9 @@ class UserAgent(RoutedAgent):
             return
         message.context.append(UserMessage(content=user_input, source="User"))
         # reply_to_topic_type is the topic type of the agent that will receive the message can be HumanAgent, WorkOrderDetectionAgent, WorkOrderOrchestrationAgent
+        ##message (Any) – The message to publish.
+        ##topic_id (TopicId) – The topic to publish the message to.
+        ##
         await self.publish_message(
             UserTask(context=message.context), topic_id=TopicId(message.reply_to_topic_type, source=self.id.key)
         )
