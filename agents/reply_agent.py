@@ -55,6 +55,7 @@ class ReplyAgent(RoutedAgent):
         self._delegate_tool_schema = [tool.schema for tool in delegate_tools]
         self._reply_to_topic_type = reply_to_topic_type # will be work order detection agent topic type
         self._user_topic_type = user_topic_type
+        self._reply_from_topic_type = "ReplyAgent"
         
         
     @message_handler
@@ -84,7 +85,7 @@ class ReplyAgent(RoutedAgent):
             
             # Send the response back to the user
             await self.publish_message(
-                AgentResponse(context=message.context, reply_to_topic_type=self._reply_to_topic_type),
+                AgentResponse(context=message.context, reply_to_topic_type=self._reply_to_topic_type, reply_from_topic_type=self._reply_from_topic_type),
                 topic_id=TopicId(self._user_topic_type, source=self.id.key),
             )
         else:

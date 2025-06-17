@@ -1,0 +1,5 @@
+1. Conntect followup agent to scheduler
+2. do proper configs to run scheduler and rabbit mq
+3. must configure agent system to operate on queues and unplug Input() from the system
+4. run each session in isolation per process
+5. save and load agent states
