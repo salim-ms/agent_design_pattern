@@ -10,11 +10,13 @@ import logging
 import os
 import signal
 import sys
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 import pytz
-from enum import Enum
 from scheduling.common import RABBITMQ_URL, EXCHANGE_NAME, QUEUE_NAME, SCHEDULE_QUEUE_NAME
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+import pickle
 
 
 # Configure logging
@@ -28,12 +30,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('scheduler')
 
-class JobStatus(Enum):
-    SCHEDULED = "scheduled"
-    DELIVERED = "delivered"
-    MISSED = "missed"
-    FAILED = "failed"
-
 # Configuration
 class Config:
     RABBITMQ_URL = os.getenv('RABBITMQ_URL', 'amqp://guest:guest@localhost//')
@@ -45,8 +41,11 @@ class Config:
     TIMEZONE = os.getenv('TIMEZONE', 'UTC')
     # How long to wait before considering a job missed (in seconds)
     MISFIRE_GRACE_TIME = int(os.getenv('MISFIRE_GRACE_TIME', '3600'))  # 1 hour default
-    # How long to keep completed/failed jobs in the database (in days)
-    JOB_CLEANUP_DAYS = int(os.getenv('JOB_CLEANUP_DAYS', '7'))
+
+# Initialize SQLAlchemy engine and session
+engine = create_engine(Config.DB_URL)
+Session = sessionmaker(bind=engine)
+
 
 # Initialize persistent scheduler
 scheduler = BackgroundScheduler(
@@ -61,34 +60,6 @@ connection = Connection(Config.RABBITMQ_URL)
 exchange = Exchange(EXCHANGE_NAME, type='direct')
 schedule_queue = Queue(Config.SCHEDULE_QUEUE_NAME, exchange=exchange, routing_key=Config.SCHEDULE_QUEUE_NAME)
 
-
-def cleanup_old_jobs():
-    """Remove jobs that are older than JOB_CLEANUP_DAYS."""
-    try:
-        cutoff_date = datetime.now(pytz.UTC) - timedelta(days=Config.JOB_CLEANUP_DAYS)
-        jobs = scheduler.get_jobs()
-        for job in jobs:
-            if job.next_run_time and job.next_run_time < cutoff_date:
-                logger.info(f"Removing old job {job.id} scheduled for {job.next_run_time}")
-                job.remove()
-    except Exception as e:
-        logger.error(f"Error during job cleanup: {e}")
-
-def update_job_status(job_id: str, status: JobStatus, error: str = None):
-    """Update job status in the database."""
-    try:
-        job = scheduler.get_job(job_id)
-        if job:
-            # Store status in job's kwargs
-            job_kwargs = job.kwargs or {}
-            job_kwargs['status'] = status.value
-            job_kwargs['status_updated_at'] = datetime.now(pytz.UTC).isoformat()
-            if error:
-                job_kwargs['error'] = error
-            job.modify(kwargs=job_kwargs)
-            logger.info(f"Updated job {job_id} status to {status.value}")
-    except Exception as e:
-        logger.error(f"Error updating job status: {e}")
 
 @retry(
     stop=stop_after_attempt(Config.MAX_RETRIES),
@@ -115,11 +86,9 @@ def send_message(payload: Dict[str, Any], job_id: str, **kwargs) -> None:
                 delivery_mode=2  # Make message persistent
             )
         logger.info(f"🔔 Delivered scheduled message: {payload}")
-        update_job_status(job_id, JobStatus.DELIVERED)
     except OperationalError as e:
         error_msg = f"Failed to send message: {e}"
         logger.error(error_msg)
-        update_job_status(job_id, JobStatus.FAILED, error_msg)
         raise
 
 def schedule_message(payload: Dict[str, Any], delay_seconds: int) -> str:
@@ -131,32 +100,32 @@ def schedule_message(payload: Dict[str, Any], delay_seconds: int) -> str:
     if run_time <= now:
         raise ValueError(f"Cannot schedule job in the past. Run time: {run_time}, Current time: {now}")
     
-    job_id = f"{payload.get('id', uuid.uuid4())}"
+    # Extract user_id from payload
+    user_id = payload.get('user_id')
+    if not user_id:
+        logger.error("No user_id provided in payload")
+        raise ValueError("user_id is required in payload")
+
+    # to keep single message for a user, we use user_id as job_id
+    job_id = user_id
     
     try:
-        # Store metadata in job's kwargs
-        job_metadata = {
-            'status': JobStatus.SCHEDULED.value,
-            'scheduled_at': now.isoformat(),
-            'scheduled_for': run_time.isoformat()
-        }
-        
+        # Add the job
         scheduler.add_job(
             func=send_message,
             trigger='date',
             run_date=run_time,
-            args=[payload, job_id],  # Pass job_id to send_message
+            args=[payload, job_id],
             id=job_id,
             replace_existing=True,
-            misfire_grace_time=Config.MISFIRE_GRACE_TIME,
-            kwargs=job_metadata  # Store metadata in job's kwargs
+            misfire_grace_time=Config.MISFIRE_GRACE_TIME
         )
-        logger.info(f"⏳ Scheduled message for {run_time} ({Config.TIMEZONE}): {payload}")
+        
+        logger.info(f"⏳ Scheduled message for {run_time} ({Config.TIMEZONE}) for user {user_id}: {payload}")
         return job_id
     except Exception as e:
         error_msg = f"Failed to schedule message: {e}"
         logger.error(error_msg)
-        update_job_status(job_id, JobStatus.FAILED, error_msg)
         raise
 
 def process_schedule_request(body, message):
@@ -199,10 +168,6 @@ def start_queue_consumer():
 def shutdown_handler(signum, frame):
     """Handle graceful shutdown."""
     logger.info("Received shutdown signal. Cleaning up...")
-    # Mark any running jobs as failed
-    for job in scheduler.get_jobs():
-        if job.next_run_time and job.next_run_time <= datetime.now(pytz.UTC):
-            update_job_status(job.id, JobStatus.MISSED, "Scheduler shutdown during execution")
     scheduler.shutdown()
     sys.exit(0)
 
@@ -214,9 +179,6 @@ if __name__ == "__main__":
     try:
         scheduler.start()
         logger.info(f"Scheduler started successfully (Timezone: {Config.TIMEZONE})")
-        
-        # Clean up old jobs on startup
-        # cleanup_old_jobs()
         
         # Start consuming from the schedule requests queue
         start_queue_consumer()
