@@ -23,7 +23,6 @@ class AgentResponse(BaseModel):
     context: List[LLMMessage]
     
 
-
 class ReplyTask(BaseModel):
     work_order_id: str
     context: List[LLMMessage]
@@ -37,7 +36,7 @@ class FollowUpPayload(BaseModel):
     message_to_deliver: str
 
 
-class FollowUpMessage(BaseModel):
+class FollowUpTask(BaseModel):
     payload: FollowUpPayload
 
 

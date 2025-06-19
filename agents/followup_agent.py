@@ -8,7 +8,7 @@ from autogen_core import (
 from autogen_core.models import (
     UserMessage,
 )
-from message_protocols import AgentResponse, FollowUpMessage, FollowUpPayload
+from message_protocols import AgentResponse, FollowUpTask, FollowUpPayload
 from scheduling.scheduler_client import SchedulerClient
 
 # Topic type for the followup agent
@@ -66,8 +66,8 @@ class FollowUpAgent(RoutedAgent):
     
     
     @message_handler
-    async def handle_followup_message(self, message: FollowUpMessage, ctx: MessageContext) -> None:
-        print(f"FollowUp Agent received FollowUpMessage {'-'*80}")
+    async def handle_followup_message(self, message: FollowUpTask, ctx: MessageContext) -> None:
+        print(f"FollowUp Agent received FollowUpTask     {'-'*80}")
         print(f"Message content: {message.payload.model_dump_json()}")
         print(f"{'-'*80}")
 
