@@ -168,6 +168,6 @@ class WorkOrderDetectionAgent(RoutedAgent):
         message.context.append(AssistantMessage(content=llm_result.content, source=self.id.type))
         # print(f"detection agent: publishing message to user{message}", flush=True)
         await self.publish_message(
-            AgentResponse(context=message.context, reply_to_topic_type=self._agent_topic_type),
+            AgentResponse(context=message.context, reply_to_topic_type=self._agent_topic_type, reply_from_topic_type=self._agent_topic_type),
             topic_id=TopicId(self._user_topic_type, source=self.id.key),
         )

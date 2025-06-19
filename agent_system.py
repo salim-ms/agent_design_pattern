@@ -33,7 +33,7 @@ from agents.work_order_detection_agent import WorkOrderDetectionAgent, escalate_
 from agents.human_agent import HumanAgent
 from agents.work_order_orchestation_agent import WorkOrderOrchestrationAgent, transfer_to_reply_agent_tool
 from agents.reply_agent import ReplyAgent
-
+from agents.followup_agent import FollowUpAgent
 
 
 import logging
@@ -64,7 +64,7 @@ work_order_detection_agent_topic_type = "WorkOrderDetectionAgent"
 work_order_orchestration_agent_topic_type = "WorkOrderOrchestrationAgent"
 human_agent_topic_type = "HumanAgent"
 reply_agent_topic_type = "ReplyAgent"
-
+followup_agent_topic_type = "FollowUpAgent"
 
 """Agent Runtime"""
 runtime = SingleThreadedAgentRuntime()
@@ -151,7 +151,17 @@ async def register_reply_agent():
     # Add subscriptions for the reply agent: it will receive messages published to its own topic only.
     await runtime.add_subscription(TypeSubscription(topic_type=reply_agent_topic_type, agent_type=reply_agent_type.type))
 
-
+# Register the followup agent.
+async def register_followup_agent():
+    followup_agent_type = await FollowUpAgent.register(
+        runtime,
+        type=followup_agent_topic_type,
+        factory=lambda: FollowUpAgent(description="Followup agent"),
+    )
+    # Add subscriptions for the followup agent: it will receive messages published to its own topic only.
+    await runtime.add_subscription(TypeSubscription(topic_type=followup_agent_topic_type, agent_type=followup_agent_type.type))
+    # Add subscription to the user topic type to receive messages sent to the user by other agents
+    await runtime.add_subscription(TypeSubscription(topic_type=user_topic_type, agent_type=followup_agent_type.type))
 
 
 # async def load_runtime_state_if_exists(session_id: str):
@@ -168,6 +178,7 @@ async def main():
     await register_human_agent()
     await register_work_order_orchestration_agent()
     await register_reply_agent()
+    await register_followup_agent()
     
     # Create sessions directory if it doesn't exist
     os.makedirs("sessions_persistant", exist_ok=True)
